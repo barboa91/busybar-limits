@@ -5,7 +5,12 @@ Live **Claude Code usage limits** on a [Flipper BUSY Bar](https://busy.bar) — 
 a full dashboard on the 160×80 OLED back, and an animated Clawd mascot whose
 mood tracks how close you are to the ceiling.
 
-<!-- preview: see the gallery app at https://busybar-apps.pages.dev/apps/claude-limits -->
+![Claude Limits on the BUSY Bar front panel](docs/screenshots/preview.gif)
+
+The front panel is only half of it — here is the same frame on the emulator and
+on real hardware, including the back OLED the emulator does not render:
+
+![Emulator and hardware, front and back](docs/screenshots/emulator-and-hardware.png)
 
 ## Two ways to run it
 
