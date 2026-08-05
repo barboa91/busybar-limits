@@ -1,0 +1,15 @@
+{
+  "device_url": "http://10.0.4.20",
+  "api_token": "YOUR_DEVICE_API_TOKEN",
+  "poll_seconds": 180,
+  "priority": 20,
+  "element_timeout_seconds": 480,
+  "user_agent": "claude-code/2.1.220",
+  "keychain_service": "Claude Code-credentials",
+  "state_dir": "~/.local/share/busybar-limits",
+  "thresholds": {
+    "high": 85
+  },
+  "device_mode_gate_enabled": true,
+  "device_mode_ws_backoff_max_seconds": 30
+}
