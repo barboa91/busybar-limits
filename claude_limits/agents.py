@@ -69,21 +69,52 @@ def _age(entry, key: str, now: float) -> float:
         return float("inf")
 
 
+
+# Claude Code keeps a permanent support-process pool alive for the
+# background-job feature (``daemon run``, and the ``bg-pty-host``/``bg-spare``
+# spare-shell pool) independent of whether any interactive session is open —
+# they match plain ``pgrep -x claude`` even with zero sessions running, which
+# pinned this gate open forever. Only a bare invocation or a real session flag
+# (``--resume``, ``--continue``, ...) counts as an actual interactive process.
+_SUPPORT_ARGV0 = ("daemon",)
+_SUPPORT_ARGV0_PREFIX = "bg-"
+
+
+def _is_support_process(argv: list) -> bool:
+    """True if ``argv[1:]`` (the args after the ``claude`` binary) belong to
+    one of Claude Code's persistent background-job support processes rather
+    than an interactive session."""
+    if len(argv) < 2:
+        return False
+    first = argv[1]
+    return first in _SUPPORT_ARGV0 or first.startswith(_SUPPORT_ARGV0_PREFIX)
+
+
 def _claude_running() -> bool:
-    """True if a ``claude`` process is alive; conservative (True) on pgrep error.
+    """True if an interactive ``claude`` session process is alive; conservative
+    (True) on pgrep error or unrecognized output so we never hide live agents.
 
     procps-ng's pgrep (the Linux implementation) has no short ``-q`` flag —
     only BSD/macOS pgrep accepts ``-xq`` combined — so ``--quiet`` is spelled
-    out and stdout/stderr are captured in case an unrecognized flag ever
-    dumps a usage message again.
+    out. ``-a`` lists full command lines so support processes can be filtered
+    out (see module comment above); text mode + captured output avoids ever
+    dumping a raw usage message if an unrecognized flag reappears.
     """
     try:
-        return subprocess.run(
-            ["pgrep", "-x", "--quiet", "claude"], capture_output=True
-        ).returncode == 0
+        proc = subprocess.run(
+            ["pgrep", "-x", "-a", "claude"], capture_output=True, text=True
+        )
     except OSError:
-        # pgrep missing/unusable — assume running so we never hide live agents.
         return True
+    if proc.returncode not in (0, 1):
+        # 0 = matches found, 1 = no matches; anything else is an error we
+        # can't interpret, so fail open rather than hide live agents.
+        return True
+    for line in proc.stdout.splitlines():
+        _pid, _, cmdline = line.partition(" ")
+        if not _is_support_process(cmdline.split()):
+            return True
+    return False
 
 
 def read_counts(cfg) -> AgentCounts:
