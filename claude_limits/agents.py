@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,9 +91,13 @@ def _is_support_process(argv: list) -> bool:
     return first in _SUPPORT_ARGV0 or first.startswith(_SUPPORT_ARGV0_PREFIX)
 
 
-def _claude_running() -> bool:
-    """True if an interactive ``claude`` session process is alive; conservative
-    (True) on pgrep error or unrecognized output so we never hide live agents.
+def _live_session_count() -> int:
+    """Count interactive ``claude`` session processes alive right now.
+
+    Returns a conservatively large number (``sys.maxsize``, i.e. "trust the
+    state file") on pgrep error or unrecognized output so we never hide live
+    agents — this mirrors the old fail-open ``True`` return, just expressed
+    as "don't cap" instead of a boolean.
 
     procps-ng's pgrep (the Linux implementation) has no short ``-q`` flag —
     only BSD/macOS pgrep accepts ``-xq`` combined — so ``--quiet`` is spelled
@@ -105,24 +110,31 @@ def _claude_running() -> bool:
             ["pgrep", "-x", "-a", "claude"], capture_output=True, text=True
         )
     except OSError:
-        return True
+        return sys.maxsize
     if proc.returncode not in (0, 1):
         # 0 = matches found, 1 = no matches; anything else is an error we
         # can't interpret, so fail open rather than hide live agents.
-        return True
+        return sys.maxsize
+    count = 0
     for line in proc.stdout.splitlines():
         _pid, _, cmdline = line.partition(" ")
         if not _is_support_process(cmdline.split()):
-            return True
-    return False
+            count += 1
+    return count
 
 
 def read_counts(cfg) -> AgentCounts:
     """Load and prune the state file, returning effective and raw counts.
 
-    ``AgentCounts.agents``/``sessions`` reflect the live count only while Claude
-    Code is running; otherwise they are 0 and the caller can still log the raw
-    values. Never raises and never writes to disk.
+    ``AgentCounts.sessions`` is capped at the number of interactive ``claude``
+    processes actually alive right now, so sessions left behind by a
+    non-graceful exit (killed terminal, crash — anything that skips the
+    ``SessionEnd`` hook) can inflate the on-disk state file without inflating
+    what gets displayed; they still age out of the file itself via
+    ``_prune``. ``agents`` (subagents) can't be bounded the same way since
+    several can belong to one live session, so it just collapses to 0
+    alongside ``sessions`` when no session process is alive at all. Never
+    raises and never writes to disk.
     """
     now = time.time()
     state = _load_state(Path(cfg.state_dir) / "agents.json")
@@ -134,8 +146,9 @@ def read_counts(cfg) -> AgentCounts:
 
     raw_agents = len(agents)
     raw_sessions = len(sessions)
-    running = _claude_running()
+    live = _live_session_count()
+    running = live > 0
 
-    if running:
-        return AgentCounts(raw_agents, raw_sessions, raw_agents, raw_sessions, True)
-    return AgentCounts(raw_agents, raw_sessions, 0, 0, False)
+    if not running:
+        return AgentCounts(raw_agents, raw_sessions, 0, 0, False)
+    return AgentCounts(raw_agents, raw_sessions, raw_agents, min(raw_sessions, live), True)
