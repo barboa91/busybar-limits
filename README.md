@@ -16,7 +16,7 @@ on real hardware, including the back OLED the emulator does not render:
 
 | | daemon (this repo) | gallery app |
 |---|---|---|
-| Shape | `claude_limits/` package + launchd agent | one self-contained `app.py` |
+| Shape | `claude_limits/` package + systemd user service | one self-contained `app.py` |
 | Runs | in the background, from login | in the foreground, while you watch it |
 | Extras | Claude Code hook for live agent/session counts, device-mode gate | none — stdlib only |
 | Get it | clone this repo, see below | [BUSY Bar app gallery](https://github.com/maxswinkels/busybar-apps/tree/main/apps/claude-limits) → `apps/claude-limits/app.py` |
@@ -40,11 +40,13 @@ silently showing old numbers as if they were current.
 
 ## Install
 
-Requires macOS (Keychain-backed credentials) and Python 3.9+. No third-party
-packages.
+This is a Linux fork of [rbhbokka/busybar-limits](https://github.com/rbhbokka/busybar-limits),
+which targets macOS (Keychain + launchd). This fork instead reads the OAuth
+token straight from the plain-JSON credentials file Claude Code writes on
+Linux and runs as a `systemd --user` service. Requires a systemd-based distro
+and Python 3.9+. No third-party packages.
 
 ```bash
-git clone https://github.com/rbhbokka/busybar-limits.git
 cd busybar-limits
 
 mkdir -p ~/.config/busybar-limits
@@ -58,16 +60,18 @@ Smoke-test a single frame before installing anything:
 python3 -m claude_limits.daemon --once --mock
 ```
 
-Then install the launchd agent and the hook:
+Then install the systemd user service and the hook:
 
 ```bash
 python3 scripts/install_daemon.py          # --dry-run to preview, --remove to undo
 python3 scripts/install_hooks.py           # --remove to undo
 ```
 
-`scripts/daemon_ctl.py on|off|status` pauses and resumes the agent without
+`scripts/daemon_ctl.py on|off|status` pauses and resumes the service without
 reinstalling it; `off` also clears the bar immediately instead of waiting out
-the element dead-man timeout.
+the element dead-man timeout. Logs land at
+`~/.local/share/busybar-limits/daemon.log`; `journalctl --user -u busybar-limits`
+also works.
 
 ## Configuration
 
@@ -84,10 +88,11 @@ required. See `config.example.json` for every key and its default.
 
 ## Credentials
 
-Usage comes from Anthropic's OAuth usage endpoint, authenticated with the token
-Claude Code already stores in your Keychain (`Claude Code-credentials`). The
-daemon refreshes that token when it is near expiry and writes the refreshed
-value back, exactly as `claude` itself does.
+Usage comes from Anthropic's OAuth usage endpoint, authenticated with the
+token Claude Code already stores at `~/.claude/.credentials.json`
+(configurable via `credentials_path`). The daemon refreshes that token when
+it is near expiry and writes the refreshed value back, exactly as `claude`
+itself does.
 
 > The gallery app takes the stricter line: it reads the token **read-only** and
 > never writes it back, rendering `AUTH EXPIRED` instead of refreshing.
@@ -103,13 +108,13 @@ claude_limits/
   render.py       pure layout — colours, formats, the mascot, 21 animations
   daemon.py       the loop: slow data cadence, ~4 fps mascot re-push
   usage.py        the usage endpoint
-  credentials.py  Keychain read + OAuth refresh
+  credentials.py  credentials-file read + OAuth refresh
   agents.py       reads the hook's agents.json
   busybar.py      device HTTP client
   device_mode.py  WebSocket gate — only draw in custom/apps mode
   config.py       config loading
 hook/             Claude Code hook that maintains agents.json
-launchd/          launchd agent template
+systemd/          systemd user service template
 scripts/          install / control / dev push
 ```
 

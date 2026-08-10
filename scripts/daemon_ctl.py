@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Turn the installed busybar limits launchd agent on or off.
+"""Turn the installed busybar limits systemd user service on or off.
 
-Wraps ``launchctl load/unload -w`` on the plist written by
-``install_daemon.py`` (``~/Library/LaunchAgents/com.busybar.limits.plist``),
-so the daemon can be paused and resumed without reinstalling it. ``-w``
-persists the enabled/disabled state across logins, matching an on/off switch
-rather than a one-shot kill that ``KeepAlive`` would just respawn.
+Wraps ``systemctl --user start/enable`` and ``stop/disable`` on the unit
+written by ``install_daemon.py``
+(``~/.config/systemd/user/busybar-limits.service``), so the daemon can be
+paused and resumed without reinstalling it. Disabling (not just stopping)
+matches launchd's ``unload -w``: the paused state survives a logout/login,
+rather than the unit's ``Restart=always``/``WantedBy=default.target``
+bringing it back at the next login.
 
 ``off`` also clears the app's elements from the device immediately, instead
 of leaving the last frame on screen until its ``element_timeout_seconds``
@@ -27,14 +29,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from claude_limits.busybar import BusyBarClient, DeviceError  # noqa: E402
 from claude_limits.config import load  # noqa: E402
 
-LABEL = "com.busybar.limits"
-DEST = os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
+LABEL = "busybar-limits.service"
+DEST = os.path.expanduser(f"~/.config/systemd/user/{LABEL}")
 
 
 def _running() -> bool:
     return subprocess.run(
-        ["launchctl", "list", LABEL],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ["systemctl", "--user", "is-active", "--quiet", LABEL],
     ).returncode == 0
 
 
@@ -61,9 +62,9 @@ def _on() -> int:
     if _running():
         print("busybar limits daemon: already on")
         return 0
-    r = subprocess.run(["launchctl", "load", "-w", DEST])
+    r = subprocess.run(["systemctl", "--user", "enable", "--now", LABEL])
     if r.returncode != 0:
-        print(f"error: launchctl load failed ({r.returncode})", file=sys.stderr)
+        print(f"error: systemctl enable --now failed ({r.returncode})", file=sys.stderr)
         return 1
     print("busybar limits daemon: on")
     return 0
@@ -76,9 +77,9 @@ def _off() -> int:
     if not _running():
         print("busybar limits daemon: already off")
         return 0
-    r = subprocess.run(["launchctl", "unload", "-w", DEST])
+    r = subprocess.run(["systemctl", "--user", "disable", "--now", LABEL])
     if r.returncode != 0:
-        print(f"error: launchctl unload failed ({r.returncode})", file=sys.stderr)
+        print(f"error: systemctl disable --now failed ({r.returncode})", file=sys.stderr)
         return 1
     _clear_device()
     print("busybar limits daemon: off")

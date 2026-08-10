@@ -1,8 +1,15 @@
-"""OAuth token lifecycle for the Claude usage endpoint."""
+"""OAuth token lifecycle for the Claude usage endpoint.
 
-import getpass
+Linux port: Claude Code stores its OAuth token as plain JSON at
+``~/.claude/.credentials.json`` (mode 0600) rather than in a Keychain, so this
+module reads/writes that file directly instead of shelling out to
+``security``. The payload shape (``{"claudeAiOauth": {...}}``) is identical to
+what the macOS version reads, so the refresh logic below is unchanged.
+"""
+
 import json
-import subprocess
+import os
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -21,22 +28,16 @@ class AuthError(Exception):
 _cache = {"token": None, "at": 0.0}
 
 
-def _read_keychain(cfg: Config) -> dict:
+def _read_credentials_file(cfg: Config) -> dict:
+    path = cfg.credentials_path
     try:
-        proc = subprocess.run(
-            ["security", "find-generic-password", "-s", cfg.keychain_service, "-w"],
-            capture_output=True,
-            timeout=10,
-        )
-    except (subprocess.SubprocessError, OSError) as exc:
-        raise AuthError(f"keychain read failed: {exc}") from exc
-    if proc.returncode != 0:
-        raise AuthError("keychain read failed")
-    try:
-        payload = json.loads(proc.stdout.decode("utf-8"))
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
         return payload["claudeAiOauth"]
-    except (json.JSONDecodeError, KeyError, UnicodeDecodeError):
-        raise AuthError("keychain read failed")
+    except FileNotFoundError as exc:
+        raise AuthError(f"credentials file not found: {path}") from exc
+    except (OSError, json.JSONDecodeError, KeyError, UnicodeDecodeError) as exc:
+        raise AuthError(f"credentials file read failed: {exc}") from exc
 
 
 def _refresh(cfg: Config, oauth: dict) -> dict:
@@ -67,28 +68,32 @@ def _refresh(cfg: Config, oauth: dict) -> dict:
     return new
 
 
-def _write_keychain(cfg: Config, oauth: dict) -> None:
-    payload = json.dumps({"claudeAiOauth": oauth})
+def _write_credentials_file(cfg: Config, oauth: dict) -> None:
+    """Rewrite the credentials file, preserving any sibling top-level keys
+    and matching Claude Code's own 0600 permissions. Atomic via temp file +
+    os.replace so a crash mid-write can't corrupt the file the CLI relies on.
+    """
+    path = cfg.credentials_path
     try:
-        proc = subprocess.run(
-            [
-                "security",
-                "add-generic-password",
-                "-s",
-                cfg.keychain_service,
-                "-a",
-                getpass.getuser(),
-                "-w",
-                payload,
-                "-U",
-            ],
-            capture_output=True,
-            timeout=10,
-        )
-    except (subprocess.SubprocessError, OSError) as exc:
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    payload["claudeAiOauth"] = oauth
+
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".credentials.json.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException as exc:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         raise AuthError(f"write-back failed: {exc}") from exc
-    if proc.returncode != 0:
-        raise AuthError("write-back failed")
 
 
 def get_access_token(cfg: Config) -> str:
@@ -98,16 +103,16 @@ def get_access_token(cfg: Config) -> str:
     if cached and now - _cache["at"] < CACHE_SECONDS:
         return cached
 
-    oauth = _read_keychain(cfg)
+    oauth = _read_credentials_file(cfg)
     try:
         if oauth.get("expiresAt", 0) / 1000 - now > 300:
             token = oauth["accessToken"]
         else:
             refreshed = _refresh(cfg, oauth)
-            _write_keychain(cfg, refreshed)
+            _write_credentials_file(cfg, refreshed)
             token = refreshed["accessToken"]
     except (KeyError, TypeError) as exc:
-        raise AuthError(f"invalid keychain entry: {exc}") from exc
+        raise AuthError(f"invalid credentials entry: {exc}") from exc
 
     _cache["token"] = token
     _cache["at"] = now

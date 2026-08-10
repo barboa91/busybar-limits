@@ -13,10 +13,12 @@ DEFAULT_POLL_SECONDS = 180
 DEFAULT_PRIORITY = 20
 DEFAULT_ELEMENT_TIMEOUT_SECONDS = 480
 DEFAULT_USER_AGENT = "claude-code/2.1.220"
-DEFAULT_KEYCHAIN_SERVICE = "Claude Code-credentials"
+DEFAULT_CREDENTIALS_PATH = "~/.claude/.credentials.json"
 DEFAULT_THRESHOLDS = {"high": 85}
 DEFAULT_DEVICE_MODE_GATE_ENABLED = True
 DEFAULT_DEVICE_MODE_WS_BACKOFF_MAX_SECONDS = 30
+DEFAULT_CLAUDE_ACTIVITY_GATE_ENABLED = True
+DEFAULT_CLAUDE_ACTIVITY_CHECK_SECONDS = 3
 
 
 @dataclass
@@ -27,11 +29,13 @@ class Config:
     priority: int
     element_timeout_seconds: int
     user_agent: str
-    keychain_service: str
+    credentials_path: str
     state_dir: str
     thresholds: dict
     device_mode_gate_enabled: bool
     device_mode_ws_backoff_max_seconds: int
+    claude_activity_gate_enabled: bool
+    claude_activity_check_seconds: int
 
     @classmethod
     def defaults(cls, device_url: str = "", api_token: str = "") -> "Config":
@@ -42,11 +46,13 @@ class Config:
             priority=DEFAULT_PRIORITY,
             element_timeout_seconds=DEFAULT_ELEMENT_TIMEOUT_SECONDS,
             user_agent=DEFAULT_USER_AGENT,
-            keychain_service=DEFAULT_KEYCHAIN_SERVICE,
+            credentials_path=_expand_home(DEFAULT_CREDENTIALS_PATH),
             state_dir=_expand_home(DEFAULT_STATE_DIR),
             thresholds=dict(DEFAULT_THRESHOLDS),
             device_mode_gate_enabled=DEFAULT_DEVICE_MODE_GATE_ENABLED,
             device_mode_ws_backoff_max_seconds=DEFAULT_DEVICE_MODE_WS_BACKOFF_MAX_SECONDS,
+            claude_activity_gate_enabled=DEFAULT_CLAUDE_ACTIVITY_GATE_ENABLED,
+            claude_activity_check_seconds=DEFAULT_CLAUDE_ACTIVITY_CHECK_SECONDS,
         )
 
 
@@ -96,7 +102,7 @@ def load() -> Config:
         config_path, data, "element_timeout_seconds", DEFAULT_ELEMENT_TIMEOUT_SECONDS
     )
     cfg.user_agent = data.get("user_agent", cfg.user_agent)
-    cfg.keychain_service = data.get("keychain_service", cfg.keychain_service)
+    cfg.credentials_path = _expand_home(data.get("credentials_path", cfg.credentials_path))
     cfg.state_dir = _expand_home(data.get("state_dir", cfg.state_dir))
     cfg.thresholds = data.get("thresholds", cfg.thresholds)
     cfg.device_mode_gate_enabled = _coerce_bool(
@@ -105,5 +111,13 @@ def load() -> Config:
     cfg.device_mode_ws_backoff_max_seconds = _coerce_int(
         config_path, data, "device_mode_ws_backoff_max_seconds",
         DEFAULT_DEVICE_MODE_WS_BACKOFF_MAX_SECONDS,
+    )
+    cfg.claude_activity_gate_enabled = _coerce_bool(
+        config_path, data, "claude_activity_gate_enabled",
+        DEFAULT_CLAUDE_ACTIVITY_GATE_ENABLED,
+    )
+    cfg.claude_activity_check_seconds = _coerce_int(
+        config_path, data, "claude_activity_check_seconds",
+        DEFAULT_CLAUDE_ACTIVITY_CHECK_SECONDS,
     )
     return cfg

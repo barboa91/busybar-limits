@@ -5,11 +5,13 @@
   "priority": 20,
   "element_timeout_seconds": 480,
   "user_agent": "claude-code/2.1.220",
-  "keychain_service": "Claude Code-credentials",
+  "credentials_path": "~/.claude/.credentials.json",
   "state_dir": "~/.local/share/busybar-limits",
   "thresholds": {
     "high": 85
   },
   "device_mode_gate_enabled": true,
-  "device_mode_ws_backoff_max_seconds": 30
+  "device_mode_ws_backoff_max_seconds": 30,
+  "claude_activity_gate_enabled": true,
+  "claude_activity_check_seconds": 3
 }

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Portably install the busybar limits launchd agent.
+"""Portably install the busybar limits systemd user service.
 
-Renders ``launchd/com.busybar.limits.plist`` (a template with ``@REPO_ROOT@``
+Renders ``systemd/busybar-limits.service`` (a template with ``@REPO_ROOT@``
 and ``@STATE_DIR@`` tokens) with this checkout's resolved paths, writes it to
-``~/Library/LaunchAgents``, and loads it via ``launchctl``. ``--dry-run``
-prints the rendered plist without touching the system; ``--remove`` unloads
-and deletes the installed plist.
+``~/.config/systemd/user``, and enables + starts it via ``systemctl --user``.
+``--dry-run`` prints the rendered unit without touching the system;
+``--remove`` stops, disables, and deletes the installed unit.
 """
 import argparse
 import os
@@ -18,8 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from claude_limits.config import DEFAULT_STATE_DIR  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_TEMPLATE = os.path.join(_REPO_ROOT, "launchd", "com.busybar.limits.plist")
-DEST = os.path.expanduser("~/Library/LaunchAgents/com.busybar.limits.plist")
+_TEMPLATE = os.path.join(_REPO_ROOT, "systemd", "busybar-limits.service")
+LABEL = "busybar-limits.service"
+DEST = os.path.expanduser(f"~/.config/systemd/user/{LABEL}")
 
 
 def _render() -> str:
@@ -34,26 +35,24 @@ def _render() -> str:
 
 def _remove() -> int:
     if not os.path.isfile(DEST):
-        print("no installed plist to remove")
+        print("no installed unit to remove")
         return 0
-    r = subprocess.run(["launchctl", "unload", "-w", DEST])
-    if r.returncode != 0:
-        print(f"error: launchctl unload failed ({r.returncode})", file=sys.stderr)
-        return 1
+    subprocess.run(["systemctl", "--user", "disable", "--now", LABEL])
     os.unlink(DEST)
+    subprocess.run(["systemctl", "--user", "daemon-reload"])
     print(f"removed {DEST}")
     return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Install the busybar limits launchd agent")
+    ap = argparse.ArgumentParser(description="Install the busybar limits systemd user service")
     ap.add_argument(
         "--dry-run", action="store_true",
-        help="print the rendered plist and exit (no writes)",
+        help="print the rendered unit and exit (no writes)",
     )
     ap.add_argument(
         "--remove", action="store_true",
-        help="unload and delete the installed plist instead",
+        help="stop, disable, and delete the installed unit instead",
     )
     args = ap.parse_args()
 
@@ -72,11 +71,16 @@ def main() -> int:
         fh.write(rendered)
     print(f"wrote {DEST}")
 
-    r = subprocess.run(["launchctl", "load", "-w", DEST])
+    r = subprocess.run(["systemctl", "--user", "daemon-reload"])
     if r.returncode != 0:
-        print(f"error: launchctl load failed ({r.returncode})", file=sys.stderr)
+        print(f"error: systemctl daemon-reload failed ({r.returncode})", file=sys.stderr)
         return 1
-    print("loaded com.busybar.limits")
+
+    r = subprocess.run(["systemctl", "--user", "enable", "--now", LABEL])
+    if r.returncode != 0:
+        print(f"error: systemctl enable --now failed ({r.returncode})", file=sys.stderr)
+        return 1
+    print(f"enabled + started {LABEL}")
     return 0
 
 

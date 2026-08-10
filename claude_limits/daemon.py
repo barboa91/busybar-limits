@@ -34,6 +34,19 @@ MAX_BACKOFF = 300  # seconds, device-unreachable backoff cap
 
 ANIM_INTERVAL = 0.25  # ~4 fps mascot re-push
 
+
+def _claude_active(cfg) -> bool:
+    """True if a Claude Code session/subagent is currently live.
+
+    Backed by the same hook-maintained ``agents.json`` (plus a live ``pgrep``
+    check) that already drives the agent/session counts on the back OLED —
+    see ``agents.read_counts``. Checked on its own ``claude_activity_check_seconds``
+    cadence (not every ~4 fps tick) since it costs a file read and a
+    subprocess spawn.
+    """
+    counts = read_counts(cfg)
+    return counts.sessions > 0 or counts.agents > 0
+
 # Live data carried across ticks. Updated on each successful data refresh so
 # the mascot animates from the freshest snapshot even between polls.
 _SNAP = None  # type: UsageSnapshot | None
@@ -105,8 +118,15 @@ def main(argv=None) -> int:
     last_good = None  # type: UsageSnapshot | None
     backoff = 0
     last_data = 0.0  # when the last data refresh ran (epoch seconds)
-    device_active = True  # last-observed device-mode gate state
+    device_active = True  # last-observed combined (mode + claude-activity) gate state
     force_redraw = False  # set on the inactive->active edge for a cheap resume
+
+    # Claude-activity gate: checked on its own slower cadence (not every fast
+    # tick) since it costs a file read + pgrep spawn. Eagerly evaluated once
+    # up front rather than fail-open, unlike the device-mode gate — there is
+    # no connect delay here, so there's no reason to draw before we know.
+    last_claude_check = 0.0
+    claude_active = _claude_active(cfg) if cfg.claude_activity_gate_enabled else True
 
 
     def build_full(snap, now, frame):
@@ -128,15 +148,28 @@ def main(argv=None) -> int:
     while True:
         now = time.time()
 
+        # ---- claude-activity gate: only draw while a Claude session/subagent is live ----
+        if cfg.claude_activity_gate_enabled and now - last_claude_check >= cfg.claude_activity_check_seconds:
+            claude_active = _claude_active(cfg)
+            last_claude_check = now
+        elif not cfg.claude_activity_gate_enabled:
+            claude_active = True
+
         # ---- device-mode gate: only draw in custom/apps mode ----
-        active = mode_listener.is_active() if mode_listener else True
+        mode_active = mode_listener.is_active() if mode_listener else True
+        active = mode_active and claude_active
         if active != device_active:
             device_active = active
             if active:
-                log.emit("INFO", "device mode active, resuming")
+                log.emit("INFO", "gates active, resuming")
                 force_redraw = True
             else:
-                log.emit("INFO", "device mode inactive, pausing")
+                log.emit(
+                    "INFO",
+                    "gates inactive, pausing"
+                    + ("" if mode_active else " (device mode)")
+                    + ("" if claude_active else " (no claude session)"),
+                )
                 try:
                     client.clear()
                 except DeviceError as exc:

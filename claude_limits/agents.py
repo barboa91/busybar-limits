@@ -70,9 +70,17 @@ def _age(entry, key: str, now: float) -> float:
 
 
 def _claude_running() -> bool:
-    """True if a ``claude`` process is alive; conservative (True) on pgrep error."""
+    """True if a ``claude`` process is alive; conservative (True) on pgrep error.
+
+    procps-ng's pgrep (the Linux implementation) has no short ``-q`` flag —
+    only BSD/macOS pgrep accepts ``-xq`` combined — so ``--quiet`` is spelled
+    out and stdout/stderr are captured in case an unrecognized flag ever
+    dumps a usage message again.
+    """
     try:
-        return subprocess.run(["pgrep", "-xq", "claude"]).returncode == 0
+        return subprocess.run(
+            ["pgrep", "-x", "--quiet", "claude"], capture_output=True
+        ).returncode == 0
     except OSError:
         # pgrep missing/unusable — assume running so we never hide live agents.
         return True

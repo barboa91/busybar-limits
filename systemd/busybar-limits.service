@@ -1,0 +1,17 @@
+[Unit]
+Description=BUSY Bar Claude Code usage limits daemon
+After=graphical-session.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m claude_limits.daemon
+WorkingDirectory=@REPO_ROOT@
+Environment=PYTHONPATH=@REPO_ROOT@
+StandardOutput=append:@STATE_DIR@/daemon.log
+StandardError=append:@STATE_DIR@/daemon.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
